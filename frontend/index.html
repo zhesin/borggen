@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>borggen — borg script constructor</title>
+<link rel="icon" href="favicon.ico">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="vendor/monaco/vs/editor/editor.main.css">
+</head>
+<body>
+<header>
+  <h1>
+    <a href="https://borgbackup.readthedocs.io/en/stable/" target="_blank" rel="noopener noreferrer" title="Open the BorgBackup documentation">
+      <img src="logo.png" alt="" width="26" height="26" class="logo">borggen
+    </a>
+  </h1>
+  <span id="status" class="status"></span>
+</header>
+
+<main>
+  <section class="form">
+    <nav class="toc" aria-label="Jump to section">
+      <a href="#section-job">Job</a>
+      <a href="#section-transport">Transport</a>
+      <a href="#section-repo">Repo</a>
+      <a href="#section-source">Source</a>
+      <a href="#section-retention">Retention</a>
+      <a href="#section-notify">Notify</a>
+      <a href="#section-runtime">Runtime</a>
+    </nav>
+
+    <div class="form-body">
+    <fieldset id="section-job">
+      <legend>Job <button type="button" class="info" data-info="job" aria-label="About this block">i</button></legend>
+      <label>BACKUPNAME <span class="req">*</span><input id="name" data-field="name" type="text" placeholder="name-your-backup"></label>
+      <label>Filename
+        <input id="filename" type="text" placeholder="name-your-backup">
+      </label>
+      <label id="git_pull_row" hidden>Import from git
+        <select id="git_jobs"><option value="">— select a job —</option></select>
+      </label>
+    </fieldset>
+
+    <fieldset id="section-transport">
+      <legend>Transport <button type="button" class="info" data-info="transport" aria-label="About this block">i</button></legend>
+      <label>Kind
+        <select id="transport_kind" data-field="transport.kind">
+          <option value="local">local — local filesystem</option>
+          <option value="sshfs">sshfs — pull from a remote host</option>
+          <option value="cifs">cifs — SMB share</option>
+        </select>
+      </label>
+      <div id="tr_sshfs" class="sub">
+        <label>Remote source (user@host:/path) <span class="req">*</span><input id="sshfs_remote" data-field="transport.sshfs_remote" type="text" placeholder="backupadmin@host:/secure/backup"></label>
+        <label>Mount point <span class="req">*</span><input id="sshfs_mount" data-field="transport.sshfs_mount" type="text" placeholder="/tmp/sshfs-host"></label>
+        <label>SSH key<input id="ssh_key" type="text" placeholder="/home/backupadmin/.ssh/id_rsa"></label>
+        <label>sshfs options (comma-separated)<input id="sshfs_opts" type="text"></label>
+      </div>
+      <div id="tr_cifs" class="sub">
+        <label>Share (//host/share) <span class="req">*</span><input id="cifs_share" data-field="transport.cifs_share" type="text" placeholder="//host.example.com/backup"></label>
+        <label>Mount point <span class="req">*</span><input id="cifs_mount" data-field="transport.cifs_mount" type="text" placeholder="/samba/host/backup"></label>
+        <label>mount options (comma-separated)<input id="cifs_opts" type="text"></label>
+        <label class="check"><input id="unmount_on_exit" type="checkbox"> Unmount after finishing</label>
+      </div>
+    </fieldset>
+
+    <fieldset id="section-repo">
+      <legend>Repo <button type="button" class="info" data-info="repo" aria-label="About this block">i</button></legend>
+      <label>Kind
+        <select id="repo_kind" data-field="repo.kind">
+          <option value="local">local</option>
+          <option value="ssh">ssh:// (push)</option>
+        </select>
+      </label>
+      <label>Repository path <span class="req">*</span><input id="repo_path" data-field="repo.path" type="text" placeholder="borg-init-your-repo-first"></label>
+      <label>Secret
+        <select id="secret_mode">
+          <option value="none">none (unencrypted repo)</option>
+          <option value="passphrase">BORG_PASSPHRASE</option>
+          <option value="passcommand">BORG_PASSCOMMAND</option>
+        </select>
+      </label>
+      <label id="secret_value_row">Value <span class="req">*</span>
+        <span class="secret-wrap">
+          <input id="secret_value" data-field="repo.secret_value" class="secret" type="password" autocomplete="new-password">
+          <button type="button" class="secret-toggle" data-target="secret_value" aria-label="Show value">👁</button>
+        </span>
+      </label>
+      <label class="check" id="allow_unknown_row"><input id="allow_unknown" type="checkbox"> Allow unencrypted repo access</label>
+      <label class="check"><input id="lock_wait_enabled" type="checkbox"> --lock-wait, s (0 = default)</label>
+      <label id="lock_wait_row" class="sub">Seconds to acquire a repository lock<input id="lock_wait" type="number" min="0"></label>
+      <label class="check"><input id="verify_enabled" type="checkbox"> borg check --repository-only</label>
+      <label id="verify_max_duration_row" class="sub">--max-duration, s<input id="verify_max_duration" type="number" min="0"></label>
+    </fieldset>
+
+    <fieldset id="section-source">
+      <legend>Source <button type="button" class="info" data-info="source" aria-label="About this block">i</button></legend>
+      <label>Paths, one per line <span class="req">*</span><textarea id="paths" data-field="source.paths" rows="4" placeholder="path-your-sources"></textarea></label>
+      <p class="hint" id="anchor_hint"></p>
+      <ul id="paths_preview" class="preview"></ul>
+      <label>Excludes, one per line <button type="button" class="info" data-info="excludes" aria-label="About exclude patterns">i</button>
+        <textarea id="excludes" data-field="source.excludes" rows="4"></textarea>
+      </label>
+      <ul id="excludes_preview" class="preview"></ul>
+      <label class="check"><input id="exclude_if_present_enabled" type="checkbox"> Exclude directories tagged with a marker file</label>
+      <div class="sub" id="exclude_if_present_box">
+        <label>Filename, one per line<textarea id="exclude_if_present" data-field="source.exclude_if_present" rows="2"></textarea></label>
+        <label class="check"><input id="keep_exclude_tags" type="checkbox"> Keep the tag file itself in the backup</label>
+      </div>
+      <label>Compression <button type="button" class="info" data-info="compression" aria-label="About compression">i</button>
+        <select id="compression_algo" data-field="source.compression">
+          <option value="none">none — do not compress</option>
+          <option value="lz4">lz4 — very fast, low ratio (borg default)</option>
+          <option value="zstd">zstd — modern, wide range</option>
+          <option value="zlib">zlib (gz) — medium speed, medium ratio</option>
+          <option value="lzma">lzma (xz) — slow, high ratio</option>
+        </select>
+      </label>
+      <label id="comp_level_row">Level <span id="comp_level_range" class="muted"></span>
+        <input id="compression_level" type="number">
+      </label>
+      <label class="check" id="comp_auto_row"><input id="compression_auto" type="checkbox"> auto — skip chunks that do not compress</label>
+      <label class="check"><input id="compression_obfuscate" type="checkbox"> obfuscate — pad stored chunk sizes</label>
+      <label id="comp_spec_row">obfuscate SPEC <span class="muted">1..6, 110..123, or 250</span>
+        <input id="compression_spec" type="number" min="1">
+      </label>
+      <ul id="compression_preview" class="preview"></ul>
+      <label>Archive name template<input id="archive_template" data-field="source.archive_template" type="text"></label>
+      <label>--checkpoint-interval, s (0 = borg default 1800)<input id="checkpoint_interval" type="number" min="0"></label>
+      <label class="check"><input id="exclude_caches" type="checkbox"> --exclude-caches</label>
+      <label class="check" id="ofs_row"><input id="one_file_system" type="checkbox"> --one-file-system</label>
+      <label class="check"><input id="no_acls" type="checkbox"> --noacls</label>
+      <label class="check"><input id="no_xattrs" type="checkbox"> --noxattrs</label>
+    </fieldset>
+
+    <fieldset id="section-retention">
+      <legend>Retention <button type="button" class="info" data-info="retention" aria-label="About this block">i</button></legend>
+        <label class="check"><input id="prune" type="checkbox" data-field="retention.prune"> Run prune</label>
+        <div class="grid sub" id="keep_fields">
+          <label>keep-last<input id="keep_last" type="number" min="0"></label>
+          <label>keep-minutely<input id="keep_minutely" type="number" min="0"></label>
+          <label>keep-hourly<input id="keep_hourly" type="number" min="0"></label>
+          <label>keep-daily<input id="keep_daily" type="number" min="0"></label>
+          <label>keep-weekly<input id="keep_weekly" type="number" min="0"></label>
+          <label>keep-monthly<input id="keep_monthly" type="number" min="0"></label>
+          <label>keep-yearly<input id="keep_yearly" type="number" min="0"></label>
+          <label>keep-within (e.g. 2d, 1m)<input id="keep_within" type="text"></label>
+        </div>
+        <label class="check"><input id="compact" type="checkbox"> Run compact</label>
+        <label id="compact_threshold_row" class="sub">compact --threshold, % (0 = borg default)<input id="compact_threshold" type="number" min="0"></label>
+    </fieldset>
+
+    <fieldset id="section-notify">
+      <legend>Notify <button type="button" class="info" data-info="notify" aria-label="About this block">i</button></legend>
+        <label class="check"><input id="tg_enabled" type="checkbox"> Telegram</label>
+        <div id="tg_box" class="sub">
+          <label>Token <span class="req">*</span>
+            <span class="secret-wrap">
+              <input id="tg_token" data-field="notify.telegram.token" class="secret" type="password" autocomplete="new-password">
+              <button type="button" class="secret-toggle" data-target="tg_token" aria-label="Show token">👁</button>
+            </span>
+          </label>
+          <label>Chat IDs, one per line <span class="req">*</span><textarea id="tg_chats" data-field="notify.telegram.chat_ids" rows="2"></textarea></label>
+          <label>Log in notifications
+            <select id="tg_attach_log_mode" data-field="notify.telegram.attach_log_mode">
+              <option value="on_error">on error only</option>
+              <option value="always">always</option>
+              <option value="never">never</option>
+            </select>
+          </label>
+          <label class="check"><input id="tg_only_on_problem" type="checkbox"> Notify only on warning/error</label>
+        </div>
+        <label class="check"><input id="mail_enabled" type="checkbox"> Email (SMTP via curl)</label>
+        <div id="mail_box" class="sub">
+          <label>To <span class="req">*</span><input id="mail_to" data-field="notify.email.to" type="text"></label>
+          <label>From <span class="req">*</span><input id="mail_from" data-field="notify.email.from" type="text"></label>
+          <label>SMTP server <span class="req">*</span><input id="smtp_server" data-field="notify.email.smtp_server" type="text"></label>
+          <label>Port <span class="req">*</span><input id="smtp_port" data-field="notify.email.smtp_port" type="number" min="0"></label>
+          <label>User<input id="smtp_user" type="text" autocomplete="off"></label>
+          <label>Password
+            <span class="secret-wrap">
+              <input id="smtp_pass" class="secret" type="password" autocomplete="new-password">
+              <button type="button" class="secret-toggle" data-target="smtp_pass" aria-label="Show password">👁</button>
+            </span>
+          </label>
+          <label>Log in notifications
+            <select id="mail_attach_log_mode" data-field="notify.email.attach_log_mode">
+              <option value="on_error">on error only</option>
+              <option value="always">always</option>
+              <option value="never">never</option>
+            </select>
+          </label>
+          <label class="check"><input id="mail_only_on_problem" type="checkbox"> Notify only on warning/error</label>
+        </div>
+        <label class="check"><input id="wh_enabled" type="checkbox"> Webhook / uptime-kuma</label>
+        <div id="wh_box" class="sub">
+          <label>Push URL (without query) <span class="req">*</span><input id="wh_url" data-field="notify.webhook.push_url" type="text" placeholder="https://uptime.example.com/api/push/TOKEN"></label>
+          <label class="check"><input id="wh_on_failure" type="checkbox"> Send status=down on failure</label>
+        </div>
+        <label class="check" id="monitor_row" hidden><input id="monitor_enabled" type="checkbox"> Report runs to borgmon</label>
+        <div class="sub" id="monitor_box">
+          <label>borgmon job token <span class="req">*</span>
+            <span class="secret-wrap">
+              <input id="monitor_token" data-field="monitor.token" class="secret" type="password" autocomplete="new-password">
+              <button type="button" class="secret-toggle" data-target="monitor_token" aria-label="Show token">👁</button>
+            </span>
+          </label>
+        </div>
+        <div class="grid" id="curl_opts_row">
+          <label>curl --connect-timeout<input id="curl_connect" type="number" min="1"></label>
+          <label>curl --max-time<input id="curl_max" type="number" min="1"></label>
+        </div>
+    </fieldset>
+
+    <fieldset id="section-runtime">
+      <legend>Runtime <button type="button" class="info" data-info="runtime" aria-label="About this block">i</button></legend>
+        <label>Before backup<textarea id="runtime_pre" rows="4" placeholder="# Put commands to run before the job here"></textarea></label>
+        <label>After backup<textarea id="runtime_post" rows="4" placeholder="# Put commands to run after the job here"></textarea></label>
+    </fieldset>
+    </div>
+  </section>
+
+  <section class="editor">
+    <div class="toolbar">
+      <button id="btn_regenerate" type="button">⟳ Regenerate</button>
+      <button id="btn_git_push" type="button" hidden title="Commit the current job and its companions to the library, then push">⇧ Push git</button>
+      <button id="btn_import" type="button">⇧ Import .sh</button>
+      <input id="file_input" type="file" accept=".sh,text/plain" hidden>
+      <button id="btn_download" type="button">⇩ Save backup .sh</button>
+      <button id="btn_check_script" type="button" title="Standalone monthly full check: borg check --verify-data">⇩ Save verify .sh</button>
+      <button id="btn_restore_drill" type="button" title="Standalone restore drill: dry-run extraction of the latest archive">⇩ Save restore .sh</button>
+      <button id="btn_copy" type="button" title="Copy the script to the clipboard">⧉ Copy</button>
+      <button id="btn_reset" type="button" class="btn-danger">Reset</button>
+    </div>
+    <div id="dirty" class="dirty"></div>
+    <ul id="problems" class="problems"></ul>
+    <div id="script"></div>
+  </section>
+</main>
+
+<!-- Explanations open here, over the page, so the form keeps its height. -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal_title">
+    <div class="modal-head">
+      <h2 id="modal_title"></h2>
+      <button type="button" id="modal_close" aria-label="Close">×</button>
+    </div>
+    <div id="modal_body" class="modal-body"></div>
+  </div>
+</div>
+
+<!-- Separate from #modal (which is doc-content driven, one Close button):
+     this one is an irreversible-action confirmation, so it needs its own
+     Cancel/confirm pair rather than repurposing the info dialog's shape. -->
+<div id="confirm_modal" class="modal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="confirm_title">
+    <div class="modal-head">
+      <h2 id="confirm_title">Reset everything?</h2>
+      <button type="button" id="confirm_close" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body">
+      <p>All fields and the current script will be cleared to start a new job
+        from scratch. Anything not saved elsewhere — including manual edits
+        in the script — will be lost. This cannot be undone.</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="confirm_cancel">Cancel</button>
+      <button type="button" id="confirm_reset" class="btn-danger">Reset</button>
+    </div>
+  </div>
+</div>
+
+<!-- Info content: one <template> per block, id="doc-<key>". -->
+<template id="doc-job">
+  <p>Job identifies the backup and names the files borggen generates for it. Scripts are
+    always generated for <strong>borg 1.2</strong>, the version the production hosts run
+    (Ubuntu 22.04 ships 1.2.0, 24.04 ships 1.2.8) — a 1.2 script also runs fine on 1.4, so the
+    output stays portable; the reverse is not true. Not emitted:
+    <code>--keep-13weekly</code>, <code>--keep-3monthly</code>, <code>--quick-stats</code>,
+    <code>compact --dry-run</code>, <code>BORG_EXIT_CODES=modern</code>.</p>
+  <p><strong>BACKUPNAME</strong> becomes the archive name prefix, and is also what prune
+    filters on — <code>--glob-archives "${BACKUPNAME}-*"</code>. The repositories are shared
+    between hosts, so this prefix is what keeps a prune from deleting another job's archives.
+    Renaming a job orphans its existing archives.</p>
+  <p><strong>Filename</strong> is the on-disk name instead — used for
+    <code>⇩ Save backup .sh</code>/<code>⇩ Save verify .sh</code>/<code>⇩ Save restore .sh</code>,
+    for <code>⇧ Push git</code>, and as the <strong>only</strong> basis for the generated
+    script's log and lock file names (<code>&lt;filename&gt;.log</code>,
+    <code>&lt;filename&gt;-check.log</code>, <code>&lt;filename&gt;-restore-drill.log</code>,
+    and the matching <code>.lock</code> files — there is no way to set a custom log path). It
+    follows BACKUPNAME automatically until edited directly, then stops following, since the
+    two are allowed to differ (e.g. a job renamed after its cron entry already points at the
+    old file). An imported or git-loaded script keeps its real filename instead of mirroring
+    BACKUPNAME.</p>
+  <p><strong>Import from git</strong> lists every job already in the library — picking one
+    loads it into the form exactly like <code>⇧ Import .sh</code>, just sourced from git
+    instead of a local file. Only visible when a Gitea remote is configured
+    (<code>BORGGEN_GIT_REMOTE_URL</code>/<code>BORGGEN_GIT_TOKEN</code>, container env vars
+    set together, never a browser-facing setting). Check/restore companion files never appear
+    here, since they carry no <code>borggen:meta</code> block. The list refreshes once at page
+    load and again on every <code>⟳ Regenerate</code>; there is no separate "pull" button.</p>
+</template>
+
+<template id="doc-transport-local">
+  <p><strong>local</strong> reads this host's filesystem directly — nothing is mounted, so
+    there is no mount step and no cleanup; the simplest and most reliable option. Sources are
+    plain absolute paths, written into the script as given:</p>
+  <pre>SOURCES=( "/etc" "/var/www" )</pre>
+  <p>Use this for data that already lives on the backup host, and for push jobs, where the
+    remote part is the <em>repository</em> rather than the source.</p>
+  <p><code>--one-file-system</code> (a Source field, but its behavior is transport-specific)
+    works here: borg compares the device number of a directory against its parent and stops
+    at mount points. The docs warn to double-check the result — bind mounts and Btrfs
+    subvolumes do not follow that rule cleanly.</p>
+</template>
+
+<template id="doc-transport-sshfs">
+  <p><strong>sshfs</strong> is a <strong>pull</strong> backup: the script mounts a remote
+    directory over SSH and lets borg read it as an ordinary path. The backup host reaches
+    out; the source host needs no borg installed.</p>
+  <p><strong>Remote source</strong> and <strong>Mount point</strong> give the SSH source and
+    where to mount it — e.g. <code>backupadmin@host:/secure/backup</code> at
+    <code>/tmp/sshfs-host</code> turns a Paths entry of <code>/etc</code> into
+    <code>SOURCES=( "${SSHFS_MOUNT}/etc" )</code>. The mount is created for this job, so it is
+    always unmounted on exit — including on failure and on Ctrl+C — and a stale mount never
+    blocks the next run. Keep the mount point stable: the docs are explicit that the file
+    cache keys on absolute paths, so a changing mount point between runs makes every file look
+    new and the backup slow. Mount the narrowest subtree, not the remote root — SFTP carries
+    no device numbers, so the whole mount reports one <code>st_dev</code> and
+    <code>--one-file-system</code> is hidden for this transport as a result; a narrow mount is
+    the only real protection against pulling in nested mounts.</p>
+  <p><strong>SSH key</strong> is a plain path passed to the mount command as
+    <code>-o IdentityFile=…</code> — it authenticates the <em>sshfs mount</em> only, a separate
+    concern from any credentials the Repo section uses to reach an <code>ssh://</code>
+    repository. Leave empty to use whatever key <code>ssh</code>'s own config/agent would pick
+    by default.</p>
+  <p><strong>sshfs options</strong> are comma-separated mount options — recommended:
+    <code>ro</code> so a backup can never write to the source, plus <code>reconnect</code> and
+    the ServerAlive settings so a dropped link does not hang the run.</p>
+</template>
+
+<template id="doc-transport-cifs">
+  <p><strong>cifs</strong> is an SMB/CIFS share mounted locally, then read as an ordinary
+    path — typical for NAS exports and Windows-side data. borg treats it as a local path, so
+    a slow or flaky share shows up as a slow backup, and <code>mount -t cifs</code> requires
+    root, so this job normally runs from root cron.</p>
+  <p><strong>Share</strong> and <strong>Mount point</strong> give the SMB share and where to
+    mount it, e.g. <code>//host.example.com/backup</code> at
+    <code>/samba/host/backup</code>.</p>
+  <p><strong>mount options</strong> are comma-separated, e.g.
+    <code>ro,sec=ntlmv2,vers=3.0,domain=EXAMPLE</code> — mount <code>ro</code> where possible,
+    since a backup should never be able to modify its source. Credentials passed this way end
+    up in the script itself (see the accepted debt in the spec); a credentials file is the
+    safer long-term form.</p>
+  <p><strong>Unmount after finishing</strong> defaults to off: the share is usually a shared
+    resource other consumers rely on, and tearing it down would affect them. Enable it only
+    when this job is the one that mounted it.</p>
+</template>
+
+<template id="doc-repo-local">
+  <p><strong>local</strong> writes archives to a filesystem path on this host — a local disk,
+    or a network share already mounted here. The docs note that a locally mounted network
+    filesystem also carries the copy traffic borg uses for transaction support, so a remote
+    target is usually better served by an <code>ssh://</code> repository than by mounting it.</p>
+  <p><strong>Repository path</strong> takes a plain filesystem path, e.g.
+    <code>export BORG_REPO=/backup/secure/borg-kvstorage</code>.
+    <strong>borggen never creates the repository</strong> — run <code>borg init</code> once
+    yourself, by hand:</p>
+  <pre>borg init --encryption=repokey /backup/secure/borg-kvstorage</pre>
+  <p>That is also where encryption is chosen, since it is a property of the repository, not
+    of this script.</p>
+  <p><strong>Secret</strong> tells the script how to unlock an already-encrypted repository:
+    <code>BORG_PASSPHRASE</code> for a literal value, or <code>BORG_PASSCOMMAND</code> for a
+    command whose output is the passphrase (executed without a shell — no variables or
+    pipes). "none" means the repository is unencrypted, and no secret env var is emitted at
+    all.</p>
+  <p><strong>Allow unencrypted repo access</strong> (<code>BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK</code>) answers the prompt borg
+    raises on first access to an unknown unencrypted repository. On by default to match the
+    existing scripts, though the borg docs suggest the opposite — that prompt exists to catch
+    a repository that was re-created, moved, or is an empty mount point.</p>
+  <p><strong>--lock-wait</strong> sets how long borg waits for a repository lock held by
+    another client — raise it when several hosts share one repository.</p>
+  <p><strong>borg check --repository-only</strong> runs a lightweight
+    consistency check after every backup — separate from the standalone, much heavier check the
+    <code>⇩ Save verify .sh</code> companion script generates. It verifies repository structure
+    and checksums without reading archive contents; the exit code folds into the script's
+    overall result.</p>
+  <p><strong>--max-duration</strong> splits a full check into partial runs, since reading
+    everything can take hours — unacceptable after every backup. The docs note that a daily
+    check with <code>--max-duration=3600</code> results in roughly one complete repository check
+    per week; a partial check performs non-cryptographic checksums only.</p>
+</template>
+
+<template id="doc-repo-ssh">
+  <p><strong>ssh://</strong> is a <strong>push</strong> backup: sources are read locally, and
+    the deduplicated, compressed, encrypted data is sent to a remote repository over SSH,
+    with borg running on both ends so only changed chunks cross the network.</p>
+  <p><strong>Repository path</strong> takes one of borg's documented <code>ssh://</code> URL
+    forms: <code>ssh://user@host:port/path</code> (absolute), <code>/./path</code> (relative
+    to the login directory), <code>/~/path</code> (relative to the user's home). The older
+    <code>user@host:/path</code> SCP-style syntax still works but is deprecated.
+    <strong>borggen never creates the repository</strong> — run <code>borg init</code> once
+    yourself, by hand:</p>
+  <pre>borg init --encryption=repokey-blake2 ssh://user@host/path/to/repo</pre>
+  <p>The SSH connection must be non-interactive (key-based auth, host key already known),
+    configured outside borggen at the OS/<code>ssh</code> level — the docs recommend
+    <code>BORG_RSH='ssh -oBatchMode=yes'</code> so a missing key fails fast instead of hanging
+    on a prompt.</p>
+  <p><strong>Secret</strong> tells the script how to unlock an already-encrypted repository:
+    <code>BORG_PASSPHRASE</code> for a literal value, or <code>BORG_PASSCOMMAND</code> for a
+    command whose output is the passphrase (executed without a shell — no variables or
+    pipes). For a push to a host you do not fully trust, an encrypted repository is the point
+    of the exercise — the remote side stores ciphertext it cannot read.</p>
+  <p><strong>Allow unencrypted repo access</strong> (<code>BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK</code>) answers the prompt borg
+    raises on first access to an unknown unencrypted repository. On by default to match the
+    existing scripts, though the borg docs suggest the opposite.</p>
+  <p><strong>--lock-wait</strong> matters more here: several hosts commonly push into one
+    repository, and a lock held by another client is normal rather than exceptional.</p>
+  <p><strong>borg check --repository-only</strong> runs a lightweight
+    consistency check after every backup — separate from the standalone, much heavier check the
+    <code>⇩ Save verify .sh</code> companion script generates. It verifies repository structure
+    and checksums without reading archive contents; the exit code folds into the script's
+    overall result.</p>
+  <p><strong>--max-duration</strong> splits a full check into partial runs, since reading
+    everything can take hours — unacceptable after every backup. The docs note that a daily
+    check with <code>--max-duration=3600</code> results in roughly one complete repository check
+    per week; a partial check performs non-cryptographic checksums only.</p>
+</template>
+
+<template id="doc-source">
+  <p>Source describes what goes into the archive.</p>
+  <p><strong>Paths</strong>, one per line, are entered as they look <em>on the source</em> —
+    for sshfs/cifs the generator prepends the mount point automatically, and the preview
+    under the field shows the exact token written into <code>SOURCES</code>.</p>
+  <p><strong>Archive name template</strong> must start with <code>{name}-</code> because
+    prune matches on that prefix, and must contain <code>{now:…}</code> or every archive
+    would collide on one name. Other borg placeholders such as <code>{hostname}</code> and
+    <code>{user}</code> also work.</p>
+  <p><strong>--exclude-caches</strong> skips any directory tagged with a
+    <code>CACHEDIR.TAG</code> file.</p>
+  <p><strong>Exclude directories tagged with a marker file</strong> generalizes that same
+    mechanism to any filename you choose — a directory containing an object with that exact
+    name is skipped, checked at every level of the walk. Enabling it fills the field below
+    with <code>.noborgbackup</code> as a starting point; these are bare filenames, not paths,
+    so unlike <strong>Excludes</strong> above there is no mount point to anchor to.
+    <strong>Keep the tag file itself in the backup</strong> keeps the tag object while still
+    dropping the rest of the directory's contents — without it, the tag file is skipped along
+    with everything else.</p>
+  <p><strong>--one-file-system</strong> stops at mount boundaries — borg compares a
+    directory's device number against its parent's. Works normally for local/cifs; hidden
+    entirely for sshfs, since SFTP carries no device numbers and the whole mount reports one
+    <code>st_dev</code>.</p>
+  <p><strong>--noacls</strong>/<strong>--noxattrs</strong> skip that metadata entirely on
+    read — useful when the source cannot carry it reliably (a CIFS mount, in particular),
+    where reading it is wasted work rather than protection.</p>
+  <p><strong>--checkpoint-interval</strong> writes a checkpoint archive every N seconds
+    during a long <code>create</code>, so a dropped connection over a slow link does not lose
+    all progress made so far. Leave at 0 for borg's own default (1800s).</p>
+</template>
+
+<template id="doc-excludes">
+  <p><strong>Patterns match the archived path, which never starts with a slash.</strong>
+    A source of <code>/home/user</code> is archived as <code>home/user/…</code>, and a
+    leading slash is stripped from the pattern too — so <code>/home/user/.zshrc</code>
+    matches, while <code>/.zshrc</code> matches nothing at all.</p>
+  <p><strong>Not like tar.</strong> The docs are explicit: in tar
+    <code>--exclude .bundler/gems</code> excludes <code>foo/.bundler/gems</code>; in borg it
+    does not — you need <code>*/.bundler/gems</code>.</p>
+  <p>Default style is fnmatch: <code>*</code> matches any characters <em>including</em>
+    <code>/</code>, <code>?</code> one character, <code>[abc]</code> / <code>[!abc]</code> a
+    set. So <code>*.o</code> matches at any depth.</p>
+  <p>A trailing slash decides the directory's fate: <code>path</code> excludes the directory
+    <em>and</em> its contents, <code>path/</code> keeps the directory and drops only the
+    contents.</p>
+  <p>Other styles by prefix: <code>sh:</code> (<code>**/</code> spans directory levels,
+    <code>*</code> does not cross <code>/</code>), <code>re:</code> (regex),
+    <code>pp:</code> (path prefix), <code>pf:</code> (exact full path).</p>
+  <p>A plain pattern that cannot match any source is rejected — that mistake produces a
+    backup which reports success and still contains everything it was meant to drop. Verify
+    the rest with <code>./&lt;job&gt;.sh --dry-run</code>, borg's own recommended way.</p>
+</template>
+
+<template id="doc-compression-none">
+  <p>No compression at all — still deduplicated and, if the repository is encrypted,
+    still encrypted. Useful for data that is already compressed (video, most archives),
+    where trying to compress it again only burns CPU for no gain.</p>
+  <p><strong>auto</strong> tries lz4 on each chunk first — if it does not compress well, the
+    chunk is stored as <code>none</code>; otherwise the algorithm/level picked above is used
+    instead. Useful when the source mixes compressible and already-compressed data.</p>
+  <p><strong>obfuscate</strong> pads the stored chunk size so it no longer reveals the real
+    size — only meaningful on an <em>encrypted</em> repository (rejected otherwise). SPEC
+    1..6 is a relative random increase (higher = larger, rarer padding), 110..123 pads to a
+    fixed power-of-two size up to 8MiB, 250 is the deterministic Padmé algorithm (≤12%
+    overhead).</p>
+</template>
+
+<template id="doc-compression-lz4">
+  <p><strong>borg's own default.</strong> Very high speed, low compression ratio. Takes no
+    level — it is one fixed, fast algorithm.</p>
+  <p>The right default when the backup window matters more than repository size, or when
+    most of the data is already dense (media, database dumps already gzip'd, etc.).</p>
+  <p><strong>auto</strong> tries lz4 on each chunk first — if it does not compress well, the
+    chunk is stored as <code>none</code>; otherwise the algorithm/level picked above is used
+    instead. Useful when the source mixes compressible and already-compressed data.</p>
+  <p><strong>obfuscate</strong> pads the stored chunk size so it no longer reveals the real
+    size — only meaningful on an <em>encrypted</em> repository (rejected otherwise). SPEC
+    1..6 is a relative random increase (higher = larger, rarer padding), 110..123 pads to a
+    fixed power-of-two size up to 8MiB, 250 is the deterministic Padmé algorithm (≤12%
+    overhead).</p>
+</template>
+
+<template id="doc-compression-zstd">
+  <p>A modern, wide-range algorithm: speed and ratio scale with the level.</p>
+  <p>Level range <strong>1..22</strong>, default <strong>3</strong> if left empty. Archives
+    compressed with zstd are not readable by borg older than 1.1.4 — irrelevant here since
+    the whole fleet targets 1.2+.</p>
+  <p>A reasonable general-purpose choice when lz4's ratio is not good enough and lzma's
+    speed is not acceptable.</p>
+  <p><strong>auto</strong> tries lz4 on each chunk first — if it does not compress well, the
+    chunk is stored as <code>none</code>; otherwise the algorithm/level picked above is used
+    instead. Useful when the source mixes compressible and already-compressed data.</p>
+  <p><strong>obfuscate</strong> pads the stored chunk size so it no longer reveals the real
+    size — only meaningful on an <em>encrypted</em> repository (rejected otherwise). SPEC
+    1..6 is a relative random increase (higher = larger, rarer padding), 110..123 pads to a
+    fixed power-of-two size up to 8MiB, 250 is the deterministic Padmé algorithm (≤12%
+    overhead).</p>
+</template>
+
+<template id="doc-compression-zlib">
+  <p>Medium speed, medium ratio ("gz"). Level range <strong>0..9</strong>, default
+    <strong>6</strong>.</p>
+  <p>Level 0 means "no compression" but still carries zlib's protocol overhead — the docs
+    call it "usually pointless" and recommend <code>none</code> instead if that is the
+    intent.</p>
+  <p><strong>auto</strong> tries lz4 on each chunk first — if it does not compress well, the
+    chunk is stored as <code>none</code>; otherwise the algorithm/level picked above is used
+    instead. Useful when the source mixes compressible and already-compressed data.</p>
+  <p><strong>obfuscate</strong> pads the stored chunk size so it no longer reveals the real
+    size — only meaningful on an <em>encrypted</em> repository (rejected otherwise). SPEC
+    1..6 is a relative random increase (higher = larger, rarer padding), 110..123 pads to a
+    fixed power-of-two size up to 8MiB, 250 is the deterministic Padmé algorithm (≤12%
+    overhead).</p>
+</template>
+
+<template id="doc-compression-lzma">
+  <p>Slow, high ratio ("xz"). Level range <strong>0..9</strong>, default <strong>6</strong>.</p>
+  <p><strong>Levels above 6 are pointless</strong> — the docs state plainly that they do not
+    compress better, because of the buffer size borg uses internally, while burning
+    significantly more CPU and RAM. The range 7..9 is still accepted (it is valid borg
+    syntax), just not worth using.</p>
+  <p>Best for archival data backed up rarely, where a slow backup window is acceptable in
+    exchange for a smaller repository.</p>
+  <p><strong>auto</strong> tries lz4 on each chunk first — if it does not compress well, the
+    chunk is stored as <code>none</code>; otherwise the algorithm/level picked above is used
+    instead. Useful when the source mixes compressible and already-compressed data.</p>
+  <p><strong>obfuscate</strong> pads the stored chunk size so it no longer reveals the real
+    size — only meaningful on an <em>encrypted</em> repository (rejected otherwise). SPEC
+    1..6 is a relative random increase (higher = larger, rarer padding), 110..123 pads to a
+    fixed power-of-two size up to 8MiB, 250 is the deterministic Padmé algorithm (≤12%
+    overhead).</p>
+</template>
+
+<template id="doc-retention">
+  <p>Retention describes how old archives get cleaned up.</p>
+  <p><strong>Run prune</strong> enables deleting archives that fall outside the keep rules
+    below — without it, nothing is ever removed and the repository only grows. It always runs
+    filtered by <code>--glob-archives "${BACKUPNAME}-*"</code>, not optional and not editable:
+    the repositories are shared, and an unfiltered prune would delete other hosts' archives.
+    Preview what a prune would remove with <code>./&lt;job&gt;.sh --dry-run</code> before
+    trusting a new retention setting.</p>
+  <p><strong>One rule to remember:</strong> each <code>keep-X</code> keeps the newest archive
+    from every period X, up to N periods that actually had a backup. Periods with no backup
+    don't count.</p>
+  <table>
+    <thead><tr><th>Option</th><th>Keeps</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td><strong>keep-last</strong></td><td>last N archives, no dates involved</td>
+        <td><code>keep-last 3</code> → newest 3, no matter how many ran today</td></tr>
+      <tr><td><strong>keep-hourly</strong></td><td>1 per hour</td>
+        <td><code>keep-hourly 24</code> → last 24 hours that had a backup</td></tr>
+      <tr><td><strong>keep-daily</strong></td><td>1 per day</td>
+        <td><code>keep-daily 7</code> → last 7 days</td></tr>
+      <tr><td><strong>keep-weekly</strong></td><td>1 per week (Mon–Sun)</td>
+        <td><code>keep-weekly 4</code> → last 4 weeks</td></tr>
+      <tr><td><strong>keep-monthly</strong></td><td>1 per month</td>
+        <td><code>keep-monthly 6</code> → last 6 months</td></tr>
+      <tr><td><strong>keep-yearly</strong></td><td>1 per year</td>
+        <td><code>keep-yearly 2</code> → last 2 years</td></tr>
+      <tr><td><strong>keep-minutely</strong></td><td>1 per minute</td>
+        <td>rarely needed — only for backups running more than once an hour</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Rules stack, not compete.</strong> An archive that already covers a day for
+    <code>keep-daily</code> isn't spent again on <code>keep-weekly</code>. So
+    <code>keep-daily 7</code> + <code>keep-weekly 4</code> + <code>keep-monthly 6</code> thins
+    out smoothly — dense recently, sparser further back — not 17 random archives.</p>
+  <p><strong>keep-within is different</strong> — not "one per period" but "everything, no
+    limit." <code>keep-within 2d</code> = keep every archive from the last 48 hours,
+    uncounted. Matters for jobs running more than once a day: without it, <code>keep-daily</code>
+    lets only <strong>one</strong> of today's runs survive.</p>
+  <p><strong>One easy-to-miss detail:</strong> weeks are Monday–Sunday, times are the server's
+    local timezone.</p>
+  <p><strong>Run compact</strong> actually frees the disk space prune only unlinked — the
+    space returns once segments are compacted. Skipped entirely in <code>--dry-run</code>.</p>
+  <p><strong>compact --threshold</strong> sets the minimum saving, in percent, that makes a
+    segment worth rewriting; 0 uses borg's own default (10%).</p>
+</template>
+
+<template id="doc-notify">
+  <p>Notify describes how the script reports its own result. All notifications are sent from
+    one place — the <code>EXIT</code> trap — so success, warnings, errors and interruptions
+    are all reported through the same path, and every channel gets the same classification;
+    nothing can exit without notifying.</p>
+  <p><strong>Telegram</strong> sends via the Bot API's <code>sendMessage</code> call, fanning
+    the same message out to every chat ID in the list — a team channel and a personal chat can
+    both get it. Fires in <code>--check</code>/<code>--dry-run</code> too, prefixed
+    <code>[CHECK]</code>/<code>[DRY-RUN]</code>: this is the channel test, since a broken
+    token should surface when someone is watching, not during a real failure — which is why
+    <strong>Notify only on warning/error</strong> below never applies to a test run, only to a
+    real one; it would otherwise defeat the point of the test. <strong>Log in
+    notifications</strong> decides when the log file is attached — on error only, always, or
+    never — useful for a full failure diagnosis without opening a shell on the backup host.
+    Both settings are Telegram's own, independent of Email's.</p>
+  <p><strong>Email</strong> is sent straight over SMTP via curl's built-in support — no local
+    MTA required. User/password are optional: an internal relay that accepts mail from the
+    local network without authentication needs neither, and the script omits
+    <code>--user</code> entirely rather than sending it empty. Same <strong>Log in
+    notifications</strong> and <strong>Notify only on warning/error</strong> settings as
+    Telegram, set independently — e.g. Telegram only on a problem, Email always.</p>
+  <p><strong>Webhook</strong> (uptime-kuma) is a dead-man's switch for what the script cannot
+    report about itself: <code>SIGKILL</code>, the OOM killer, a host that never booted, a
+    cron job that never fired — configure the expected interval on the monitoring side. It is
+    <strong>never</strong> sent in <code>--check</code>/<code>--dry-run</code>, even on
+    success — the one channel with no test-mode equivalent, since a test run must not feed the
+    switch and mask a failed real backup. "Send status=down on failure" tells the monitor to
+    distinguish "backup failed" from "backup never ran" instead of just going silent either
+    way.</p>
+  <p><strong>curl --connect-timeout / --max-time</strong> time-box every curl call used by
+    any channel — without that, a notification during host shutdown can hang until systemd
+    escalates to SIGKILL.</p>
+</template>
+
+<template id="doc-runtime">
+  <p>Runtime describes the two hand-edit hooks that run around the backup.</p>
+  <p><strong>Before backup</strong> runs after preflight, right before <code>borg create</code>;
+    free-form shell, run on a real run and on <code>--dry-run</code> (so a rehearsal exercises
+    it too), skipped entirely on <code>--check</code>, which is meant to verify the
+    environment only, never touch data. Typical use: a database dump, stopping a service.</p>
+  <p><strong>After backup</strong> runs after <code>borg compact</code>, right before the
+    script exits; same run-mode rules as Before backup. Typical use: restarting a service
+    stopped in Before backup, cleaning up a temporary file.</p>
+  <p>Both fields are kept in sync with the
+    <code>borggen:user:pre</code>/<code>borggen:user:post</code> zones directly in the
+    script — typing here or editing there is the same thing, and either way the content
+    <strong>survives regeneration</strong>: the one part of the script never overwritten when
+    the form changes.</p>
+</template>
+
+<script src="vendor/monaco/vs/loader.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

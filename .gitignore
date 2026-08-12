@@ -1,0 +1,38 @@
+# Compiled binary (built into the image, never committed)
+/borggen
+/borggen-*
+
+# Runtime data: the draft file and, later, the library git repo live here
+/data/
+
+# Real production scripts kept locally for model/parser work — they carry live
+# credentials (Telegram tokens, CIFS/mysql passwords) and must never be committed
+/example-bash/
+
+# Go test/build cache is never checked in; vendored deps we don't use
+/vendor/
+
+# Local, per-machine Claude Code permissions (settings.json would be shared)
+.claude/settings.local.json
+
+# Local secrets. .env is legacy (BORGGEN_GIT_TOKEN, once loaded via ${VAR}
+# substitution); compose.dev.yaml now reads .env.dev instead, via env_file —
+# see .env.dev.example for the tracked template. Neither is ever committed.
+.env
+.env.dev
+
+# Deployed to several servers, each with its own Host rule / middleware name /
+# Gitea remote — a shared committed file caused real divergent-history pain
+# across them. compose.yaml.example is the tracked template; this is now
+# per-server and local-only. See compose.yaml.example to (re)create it.
+/compose.yaml
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Scratch downloads (Monaco tarball etc.) — never inside the repo tree anyway
+*.tgz

@@ -1,0 +1,63 @@
+# Production stack: behind the existing Traefik + tinyauth perimeter.
+# No published port — the service is reachable only through the proxy network.
+# For local development use compose.dev.yaml instead (direct port, no Traefik).
+#
+# This file is the template — compose.yaml itself is git-ignored, because
+# it is deployed to several servers and each one needs its own Host rule /
+# middleware name / (optionally) Gitea remote. Committing one shared
+# compose.yaml meant every server's local edits fought each other as
+# divergent git history. Copy this file to compose.yaml and adjust it for
+# the server it runs on; that copy is never committed.
+#
+#   cp compose.yaml.example compose.yaml
+#
+# Before first deploy, align the placeholders below with the real proxy stack:
+#   - the Host(...) rule
+#   - the middleware name (tinyauth@docker here)
+#   - the external network name (proxy here)
+services:
+  borggen:
+    build: .
+    container_name: borggen
+    restart: unless-stopped
+    volumes:
+      # Persistent: the library git repo and draft.json survive recreation.
+      - borggen-data:/data
+    # Two optional integrations, both absent rather than disabled when unset:
+    # the UI does not mention a feature this deployment does not have.
+    #
+    # Git: publish the local library to a Gitea remote. Both variables must be
+    # set together or the integration stays off entirely. The token is an env
+    # var, never a CLI flag, so it never shows up in `ps aux` — put it in a
+    # local .env file next to this compose.yaml (already .gitignore'd), not
+    # here.
+    #
+    # borgmon: report every run to a monitoring instance. Only the URL belongs
+    # here — it is the same for every job on this server. The per-job token is
+    # issued by borgmon and entered in the form, because each job has its own.
+    # Point this at the host borgmon answers on, not at its container name:
+    # the generated scripts run on the backup hosts, not on this network.
+    # environment:
+    #   BORGGEN_GIT_REMOTE_URL: "http://gitea.example.local/user/repo.git"
+    #   BORGGEN_GIT_TOKEN: "${BORGGEN_GIT_TOKEN}"
+    #   BORGMON_URL: "https://borgmon.example.local"
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.borggen.rule=Host(`borggen.example.local`)"
+      - "traefik.http.routers.borggen.entrypoints=web"
+      - "traefik.http.services.borggen.loadbalancer.server.port=8080"
+      - "traefik.http.routers.borggen.middlewares=tinyauth@docker"
+
+volumes:
+  borggen-data:
+
+networks:
+  proxy:
+    external: true   # the same network where Traefik and tinyauth already run
